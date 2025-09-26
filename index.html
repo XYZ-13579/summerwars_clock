@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>summerwars_clock</title>
+  <script src="https://cdn.amcharts.com/lib/4/core.js"></script>
+  <script src="https://cdn.amcharts.com/lib/4/maps.js"></script>
+  <script src="https://cdn.amcharts.com/lib/4/geodata/worldLow.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: white;
+      font-display: block; /* フォントの最適化 */
+    }
+    #chartdiv {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      will-change: transform; /* GPU加速を促進 */
+    }
+    #japanTime {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 13vw;
+      font-family: 'Courier New', monospace; /* 等幅フォントで数字の幅を統一 */
+      font-weight: 700;
+      color: black;
+      background: rgba(145, 145, 145, 0.4);
+      padding: 0.2em 0.2em;
+      font-variant-numeric: tabular-nums; 
+      font-feature-settings: "tnum";  
+      white-space: nowrap;
+      line-height: 1;
+      text-rendering: optimizeSpeed; /* レンダリング速度を優先 */
+      -webkit-font-smoothing: subpixel-antialiased; /* サブピクセル精度 */
+      -moz-osx-font-smoothing: auto;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 4px 20px rgba(145, 145, 145, 0.4);
+      user-select: none;
+      pointer-events: none;
+      letter-spacing: 0;
+      gap: 0;
+      font-family:Arial;
+      align-items: center;
+      display: flex;
+      will-change: contents; /* 内容変更の最適化 */
+    }
+
+    /* 各桁を固定幅に */
+    #japanTime span {
+      display: inline-block;
+      width: 0.5em;
+      text-align: center;
+      will-change: contents; /* 個別の数字変更を最適化 */
+    }
+
+    /* パフォーマンス向上のための追加スタイル */
+    * {
+      -webkit-backface-visibility: hidden;
+      backface-visibility: hidden;
+      -webkit-perspective: 1000;
+      perspective: 1000;
+    }
+  </style>
+</head>
+<body>
+  <div id="chartdiv"></div>
+  <div id="japanTime">
+    <span id="h1">0</span><span id="h2">0</span>:
+    <span id="m1">0</span><span id="m2">0</span>:
+    <span id="s1">0</span><span id="s2">0</span>:
+    <span id="ms1">0</span><span id="ms2">0</span>
+  </div>
+
+  <script>
+    // チャート初期化
+    var chart = am4core.create("chartdiv", am4maps.MapChart);
+    chart.geodata = am4geodata_worldLow;
+    chart.projection = new am4maps.projections.Orthographic();
+    chart.deltaLatitude = -10;
+    chart.panBehavior = "rotateLong";
+
+    // より滑らかなイージング設定
+    chart.inertiaOptions.friction = 0.97; // 慣性の摩擦を調整
+    
+    // 高品質レンダリング設定
+    chart.pixelPerfect = true;
+    chart.svgContainer.htmlElement.style.imageRendering = "optimizeQuality";
+
+    // Create map polygon series
+    var polygonSeries = chart.series.push(new am4maps.MapPolygonSeries());
+    polygonSeries.useGeodata = true;
+    polygonSeries.north = 90;
+    polygonSeries.south = -90;
+
+    // Function to set continent colors
+    function setContinentColors() {
+      return [
+        { id: "SE", name: "Sweden", fill: am4core.color("#f47efc") },
+        { id: "DK", name: "Denmark", fill: am4core.color("#f47efc") },
+        { id: "US", name: "United States", fill: am4core.color("#f47efc") },
+        { id: "PT", name: "Portugal", fill: am4core.color("#f47efc") },
+        { id: "IT", name: "Italy", fill: am4core.color("#f47efc") },
+        { id: "TR", name: "Turkey", fill: am4core.color("#f47efc") },
+        { id: "ZA", name: "South Africa", fill: am4core.color("#f47efc") },
+        { id: "AE", name: "United Arab Emirates", fill: am4core.color("#f47efc") },
+        { id: "BR", name: "Brasil", fill: am4core.color("#f47efc") }
+      ];
+    }
+
+    // Configure series
+    var polygonTemplate = polygonSeries.mapPolygons.template;
+    polygonTemplate.fill = am4core.color("#f47efc");
+    polygonTemplate.stroke = am4core.color("#f47efc");
+    polygonTemplate.strokeWidth = 0;
+
+    // Apply continent colors
+    polygonSeries.data = setContinentColors();
+    polygonTemplate.propertyFields.fill = "fill";
+
+    // Remove Antarctica
+    polygonSeries.exclude = ["AQ"];
+
+    chart.backgroundSeries.mapPolygons.template.polygon.fill = am4core.color("#FFFFFF");
+    chart.backgroundSeries.mapPolygons.template.polygon.fillOpacity = 0;
+    chart.backgroundSeries.toBack();
+
+    // 高精度時間更新システム
+    class HighPrecisionTimer {
+      constructor() {
+        this.elements = {
+          h1: document.getElementById('h1'),
+          h2: document.getElementById('h2'),
+          m1: document.getElementById('m1'),
+          m2: document.getElementById('m2'),
+          s1: document.getElementById('s1'),
+          s2: document.getElementById('s2'),
+          ms1: document.getElementById('ms1'),
+          ms2: document.getElementById('ms2')
+        };
+        this.lastValues = new Array(8).fill('');
+        this.updateTime();
+      }
+
+      updateTime() {
+        const now = new Date();
+        const jst = new Date(now.getTime() + (9 * 60 * 60 * 1000) - (now.getTimezoneOffset() * 60000) + (6 * 60 * 60 * 1000));
+
+        const h = String(jst.getHours()).padStart(2, '0');
+        const m = String(jst.getMinutes()).padStart(2, '0');
+        const s = String(jst.getSeconds()).padStart(2, '0');
+        const ms = String(Math.floor(jst.getMilliseconds() / 10)).padStart(2, '0');
+
+        const values = [...h, ...m, ...s, ...ms];
+        const keys = ['h1', 'h2', 'm1', 'm2', 's1', 's2', 'ms1', 'ms2'];
+
+        // 変更された値のみを更新（DOM操作を最小化）
+        for (let i = 0; i < 8; i++) {
+          if (this.lastValues[i] !== values[i]) {
+            this.elements[keys[i]].textContent = values[i];
+            this.lastValues[i] = values[i];
+          }
+        }
+
+        requestAnimationFrame(() => this.updateTime());
+      }
+    }
+
+    // 超高精度回転システム
+    class UltraSmoothRotation {
+      constructor(chart) {
+        this.chart = chart;
+        this.lastTime = performance.now();
+        this.targetRotationSpeed = 0.2; // 目標回転速度（度/フレーム）
+        this.currentRotationSpeed = 0;
+        this.acceleration = 0.01; // 加速度
+        this.interpolationFactor = 0.98; // 補間係数
+        
+        // 高精度フレームレート制御
+        this.targetFPS = 144; // 高リフレッシュレート対応
+        this.frameInterval = 1000 / this.targetFPS;
+        this.lastFrameTime = 0;
+        
+        this.rotate();
+      }
+
+      easeInOutCubic(t) {
+        return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+      }
+
+      rotate(currentTime = performance.now()) {
+        const deltaTime = currentTime - this.lastTime;
+        
+        // フレームレート制御
+        if (currentTime - this.lastFrameTime >= this.frameInterval) {
+          // 滑らかな加速/減速
+          this.currentRotationSpeed = this.lerp(
+            this.currentRotationSpeed, 
+            this.targetRotationSpeed, 
+            this.acceleration
+          );
+
+          // 高精度時間ベースの回転計算
+          const normalizedDelta = deltaTime / 16.67; // 60FPS基準で正規化
+          const rotationAmount = this.currentRotationSpeed * normalizedDelta;
+          
+          // マイクロ補間を使用した超滑らかな回転
+          const easedRotation = this.easeInOutCubic(
+            (currentTime % 1000) / 1000
+          ) * 0.1 + rotationAmount;
+          
+          this.chart.deltaLongitude += easedRotation;
+          
+          this.lastFrameTime = currentTime;
+        }
+        
+        this.lastTime = currentTime;
+        requestAnimationFrame((time) => this.rotate(time));
+      }
+
+      lerp(start, end, factor) {
+        return start + (end - start) * factor;
+      }
+    }
+
+    // システム初期化
+    chart.events.on("ready", () => {
+      // 高精度タイマー開始
+      new HighPrecisionTimer();
+      
+      // 超滑らか回転開始
+      new UltraSmoothRotation(chart);
+      
+      // 追加の最適化設定
+      chart.maxZoomLevel = 1;
+      chart.seriesContainer.draggable = false;
+      chart.seriesContainer.resizable = false;
+      
+      // レンダリング最適化
+      if (chart.svgContainer) {
+        chart.svgContainer.htmlElement.style.transform = 'translateZ(0)';
+        chart.svgContainer.htmlElement.style.willChange = 'transform';
+      }
+    });
+
+    // ページの可視性変更時の最適化
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // ページが非表示の時は処理を軽くする
+        chart.events.disable();
+      } else {
+        // ページが表示された時は処理を再開
+        chart.events.enable();
+      }
+    });
+
+    // パフォーマンス監視と動的調整
+    let frameCount = 0;
+    let lastFPSCheck = performance.now();
+    
+    function monitorPerformance() {
+      frameCount++;
+      const now = performance.now();
+      
+      if (now - lastFPSCheck >= 1000) {
+        const fps = frameCount;
+        frameCount = 0;
+        lastFPSCheck = now;
+        
+        // FPSが低い場合は回転速度を調整
+        if (fps < 30) {
+          chart.targetRotationSpeed *= 0.8;
+        } else if (fps > 120) {
+          chart.targetRotationSpeed = Math.min(chart.targetRotationSpeed * 1.1, 0.3);
+        }
+      }
+      
+      requestAnimationFrame(monitorPerformance);
+    }
+    monitorPerformance();
+  </script>
+</body>
+</html>
